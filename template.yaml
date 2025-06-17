@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: RAG API using AWS Bedrock and OpenSearch
+
+Parameters:
+  OpenSearchEndpoint:
+    Type: String
+    Description: OpenSearch cluster endpoint URL
+    Default: https://search-your-domain.us-east-1.es.amazonaws.com
+    
+  Environment:
+    Type: String
+    Description: Environment name
+    Default: prod
+    AllowedValues: [dev, staging, prod]
+
+Globals:
+  Function:
+    Timeout: 300
+    MemorySize: 1024
+    Runtime: java17
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        SPRING_PROFILES_ACTIVE: !Ref Environment
+
+Resources:
+  # Lambda Execution Role
+  RagApiExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:ListFoundationModels
+                Resource: '*'
+        - PolicyName: OpenSearchAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - es:ESHttpGet
+                  - es:ESHttpPost
+                  - es:ESHttpPut
+                  - es:ESHttpDelete
+                Resource: !Sub '${OpenSearchEndpoint}/*'
+
+  # Lambda Function
+  RagApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'rag-api-${Environment}'
+      CodeUri: target/rag-api-1.0.0-aws.jar
+      Handler: com.example.ragapi.lambda.LambdaHandler::handleRequest
+      Role: !GetAtt RagApiExecutionRole.Arn
+      Environment:
+        Variables:
+          OPENSEARCH_URL: !Ref OpenSearchEndpoint
+          AWS_REGION: !Ref AWS::Region
+          BEDROCK_EMBEDDING_MODEL: amazon.titan-embed-text-v1
+          BEDROCK_CLAUDE_MODEL: anthropic.claude-3-sonnet-20240229-v1:0
+          OPENSEARCH_INDEX: documents
+      Events:
+        ApiGatewayRoot:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApiGateway
+            Path: /
+            Method: ANY
+        ApiGatewayProxy:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RagApiGateway
+            Path: /{proxy+}
+            Method: ANY
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt RagApiDLQ.Arn
+
+  # API Gateway
+  RagApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub 'rag-api-${Environment}'
+      StageName: !Ref Environment
+      TracingEnabled: true
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          DataTraceEnabled: true
+          MetricsEnabled: true
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+        MaxAge: "'600'"
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+
+  # Dead Letter Queue
+  RagApiDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'rag-api-dlq-${Environment}'
+      MessageRetentionPeriod: 1209600 # 14 days
+
+  # CloudWatch Log Group
+  RagApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/rag-api-${Environment}'
+      RetentionInDays: 30
+
+  # CloudWatch Alarms
+  RagApiErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'RagApi-Errors-${Environment}'
+      AlarmDescription: 'RAG API Lambda function errors'
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref RagApiFunction
+
+  RagApiDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'RagApi-Duration-${Environment}'
+      AlarmDescription: 'RAG API Lambda function duration'
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 30000 # 30 seconds
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref RagApiFunction
+
+Outputs:
+  ApiUrl:
+    Description: 'API Gateway endpoint URL'
+    Value: !Sub 'https://${RagApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiUrl'
+      
+  ApiId:
+    Description: 'API Gateway ID'
+    Value: !Ref RagApiGateway
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiId'
+      
+  LambdaFunctionArn:
+    Description: 'Lambda Function ARN'
+    Value: !GetAtt RagApiFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaArn'
+      
+  LambdaFunctionName:
+    Description: 'Lambda Function Name'
+    Value: !Ref RagApiFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaName'

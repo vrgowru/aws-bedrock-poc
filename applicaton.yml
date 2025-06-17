@@ -1,0 +1,66 @@
+spring:
+  application:
+    name: rag-api
+  
+  main:
+    web-application-type: servlet
+    lazy-initialization: true
+  
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: NON_NULL
+    
+  web:
+    resources:
+      add-mappings: false
+
+  # Spring AI Configuration
+  ai:
+    bedrock:
+      aws:
+        region: ${AWS_REGION:us-east-1}
+        access-key: ${AWS_ACCESS_KEY_ID:}
+        secret-key: ${AWS_SECRET_ACCESS_KEY:}
+      titan:
+        embedding:
+          model: ${BEDROCK_EMBEDDING_MODEL:amazon.titan-embed-text-v1}
+          options:
+            temperature: 0.0
+      anthropic:
+        chat:
+          model: ${BEDROCK_CLAUDE_MODEL:anthropic.claude-3-sonnet-20240229-v1:0}
+          options:
+            temperature: 0.7
+            max-tokens: 4000
+    opensearch:
+      url: ${OPENSEARCH_URL:https://localhost:9200}
+      username: ${OPENSEARCH_USERNAME:}
+      password: ${OPENSEARCH_PASSWORD:}
+      index-name: ${OPENSEARCH_INDEX:documents}
+      dimensions: ${OPENSEARCH_DIMENSIONS:1536}
+      similarity: ${OPENSEARCH_SIMILARITY:cosine}
+      
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+# Logging Configuration
+logging:
+  level:
+    com.example.ragapi: DEBUG
+    org.springframework.ai: INFO
+    org.springframework.web: INFO
+    software.amazon.awssdk: WARN
+    org.opensearch: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
