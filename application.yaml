@@ -1,0 +1,33 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: rag-poc
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+# Ollama Configuration
+ollama:
+  url: http://localhost:11434
+  model: llama3.1:latest
+  embedding-model: nomic-embed-text
+
+# OpenSearch Configuration
+opensearch:
+  url: http://localhost:9200
+  username: admin
+  password: admin
+  index-name: document-embeddings
+
+# RAG Configuration
+rag:
+  chunk-size: 500
+  chunk-overlap: 50
+
+logging:
+  level:
+    com.example.ragpoc: DEBUG
+    dev.langchain4j: DEBUG
