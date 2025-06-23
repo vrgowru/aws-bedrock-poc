@@ -1,0 +1,98 @@
+package com.example.ragpoc.controller;
+
+import com.example.ragpoc.model.DocumentChunk;
+import com.example.ragpoc.service.OpenSearchService;
+import com.example.ragpoc.service.PdfProcessingService;
+import com.example.ragpoc.service.RagService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/documents")
+@CrossOrigin(origins = "*")
+public class DocumentController {
+
+    private static final Logger logger = LoggerFactory.getLogger(DocumentController.class);
+
+    @Autowired
+    private PdfProcessingService pdfProcessingService;
+
+    @Autowired
+    private OpenSearchService openSearchService;
+
+    @Autowired
+    private RagService ragService;
+
+    @PostMapping("/upload")
+    public ResponseEntity<?> uploadDocument(@RequestParam("file") MultipartFile file) {
+        try {
+            if (file.isEmpty()) {
+                return ResponseEntity.badRequest().body("Please select a file to upload");
+            }
+
+            if (!file.getContentType().equals("application/pdf")) {
+                return ResponseEntity.badRequest().body("Only PDF files are supported");
+            }
+
+            logger.info("Received file upload request: {}", file.getOriginalFilename());
+
+            // Process PDF and create embeddings
+            List<DocumentChunk> chunks = pdfProcessingService.processPdfFile(file);
+
+            // Index chunks in OpenSearch
+            openSearchService.indexDocumentChunks(chunks);
+
+            return ResponseEntity.ok(Map.of(
+                "message", "Document processed successfully",
+                "chunksCreated", chunks.size(),
+                "filename", file.getOriginalFilename()
+            ));
+
+        } catch (Exception e) {
+            logger.error("Error uploading document: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(
+                Map.of("error", "Failed to process document: " + e.getMessage())
+            );
+        }
+    }
+
+    @PostMapping("/query")
+    public ResponseEntity<?> queryDocuments(@RequestBody Map<String, String> request) {
+        try {
+            String query = request.get("query");
+            if (query == null || query.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body("Query cannot be empty");
+            }
+
+            logger.info("Received query request: {}", query);
+
+            String response = ragService.processQuery(query);
+
+            return ResponseEntity.ok(Map.of(
+                "query", query,
+                "response", response
+            ));
+
+        } catch (Exception e) {
+            logger.error("Error processing query: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(
+                Map.of("error", "Failed to process query: " + e.getMessage())
+            );
+        }
+    }
+
+    @GetMapping("/health")
+    public ResponseEntity<?> healthCheck() {
+        return ResponseEntity.ok(Map.of(
+            "status", "healthy",
+            "timestamp", System.currentTimeMillis()
+        ));
+    }
+}
