@@ -1,0 +1,269 @@
+openapi: 3.0.3
+info:
+  title: BenefitsAssist Inference API
+  description: API for benefits inference and query processing
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@example.com
+servers:
+  - url: https://api.example.com/benefitsassist/inference/1.0
+    description: Production server
+  - url: https://staging-api.example.com/benefitsassist/inference/1.0
+    description: Staging server
+
+paths:
+  /query:
+    post:
+      summary: Process benefits inference query
+      description: Submit a query for benefits inference processing
+      operationId: processInferenceQuery
+      parameters:
+        - name: X-ClientName
+          in: header
+          required: true
+          description: Name of the client application making the request
+          schema:
+            type: string
+            example: "BenefitsPortal"
+        - name: X-ClientSessionId
+          in: header
+          required: true
+          description: Unique session identifier for the client
+          schema:
+            type: string
+            format: uuid
+            example: "123e4567-e89b-12d3-a456-426614174000"
+        - name: X-TrackingId
+          in: header
+          required: true
+          description: Unique tracking identifier for request tracing
+          schema:
+            type: string
+            format: uuid
+            example: "987fcdeb-51a2-43d1-9f4e-123456789abc"
+        - name: X-SubmitDateTime
+          in: header
+          required: true
+          description: Date and time when the request was submitted
+          schema:
+            type: string
+            format: date-time
+            example: "2025-06-30T14:30:00Z"
+        - name: X-UserId
+          in: header
+          required: false
+          description: Identifier of the user making the request
+          schema:
+            type: string
+            example: "user12345"
+        - name: X-UserRole
+          in: header
+          required: false
+          description: Role of the user making the request
+          schema:
+            type: string
+            enum: ["admin", "user", "guest", "agent"]
+            example: "user"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - converagePackageCode
+                - requestDate
+                - query
+              properties:
+                conversationId:
+                  type: string
+                  description: Identifier for the conversation context
+                  example: "conv_789012345"
+                sessionId:
+                  type: string
+                  description: Session identifier for maintaining context
+                  example: "sess_456789012"
+                converagePackageCode:
+                  type: array
+                  description: List of coverage package codes (must be non-empty)
+                  minItems: 1
+                  items:
+                    type: string
+                  example: ["PKG_PREMIUM_001", "PKG_BASIC_002"]
+                requestDate:
+                  type: string
+                  format: date
+                  description: Date of the request (YYYY-MM-DD)
+                  example: "2025-06-30"
+                query:
+                  type: string
+                  description: The benefits query to be processed
+                  minLength: 1
+                  example: "What are my dental coverage benefits?"
+                groupAnniversaryDate:
+                  type: string
+                  format: date
+                  description: Anniversary date of the group plan (YYYY-MM-DD)
+                  example: "2024-01-01"
+                stateCode:
+                  type: string
+                  description: Two-letter state code
+                  pattern: "^[A-Z]{2}$"
+                  example: "CA"
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Successful inference response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      inferenceResults:
+                        type: object
+                        description: Results of the benefits inference processing
+                      confidence:
+                        type: number
+                        format: float
+                        minimum: 0
+                        maximum: 1
+                        description: Confidence score of the inference
+                        example: 0.95
+                      recommendations:
+                        type: array
+                        items:
+                          type: string
+                        description: List of recommendations based on the query
+                  metadata:
+                    type: object
+                    properties:
+                      trackingId:
+                        type: string
+                        description: Echo of the request tracking ID
+                        example: "987fcdeb-51a2-43d1-9f4e-123456789abc"
+                      processedAt:
+                        type: string
+                        format: date-time
+                        description: Timestamp when the request was processed
+                        example: "2025-06-30T14:30:15Z"
+                      conversationId:
+                        type: string
+                        description: Conversation identifier for context
+                        example: "conv_789012345"
+        '400':
+          description: Bad request - Invalid input parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - Invalid or missing bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - Insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Entity - Validation errors
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "INVALID_REQUEST"
+            message:
+              type: string
+              example: "The request contains invalid parameters"
+            details:
+              type: string
+              example: "query field is required and cannot be empty"
+        metadata:
+          type: object
+          properties:
+            trackingId:
+              type: string
+              description: Tracking ID for error correlation
+              example: "987fcdeb-51a2-43d1-9f4e-123456789abc"
+            timestamp:
+              type: string
+              format: date-time
+              example: "2025-06-30T14:30:15Z"
+
+    ValidationErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "VALIDATION_ERROR"
+            message:
+              type: string
+              example: "Request validation failed"
+            validationErrors:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                    example: "converagePackageCode"
+                  message:
+                    type: string
+                    example: "must contain at least one item"
+        metadata:
+          type: object
+          properties:
+            trackingId:
+              type: string
+              example: "987fcdeb-51a2-43d1-9f4e-123456789abc"
+            timestamp:
+              type: string
+              format: date-time
+              example: "2025-06-30T14:30:15Z"
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT Bearer token authentication
+
+security:
+  - BearerAuth: []
